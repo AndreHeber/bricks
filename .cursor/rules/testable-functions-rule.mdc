@@ -1,0 +1,137 @@
+---
+description: 
+globs: 
+---
+<rule>
+name: testable-functions
+description: >
+  Ensures that new functions are written with testability in mind and are accompanied 
+  by appropriate unit tests. This rule promotes test-driven development (TDD) practices 
+  and maintains high test coverage.
+
+filters:
+  - type: content
+    pattern: "func\\s+\\w+\\s*\\("
+  - type: file_extension
+    pattern: "\\.go$"
+  - type: event
+    pattern: "file_modify|file_create"
+  - type: content
+    pattern: "package\\s+\\w+"
+
+actions:
+  - type: suggest
+    message: |
+      New function detected. Remember to:
+      
+      1. Write unit tests in a corresponding *_test.go file
+      2. Follow testability best practices:
+         - Use dependency injection for external dependencies
+         - Keep functions focused and single-purpose
+         - Avoid global state
+         - Make dependencies explicit in function signatures
+      
+      Testing Checklist:
+      ✓ Created corresponding test file
+      ✓ Included both happy path and error cases
+      ✓ Mocked external dependencies
+      ✓ Used table-driven tests where appropriate
+      ✓ Added meaningful test descriptions
+      ✓ Verified edge cases
+
+  - type: lint
+    conditions:
+      - pattern: "func\\s+\\w+\\s*\\([^)]*\\)\\s*[^{]*{[^}]*http\\.Client[^}]*}"
+        message: "Consider injecting http.Client as a parameter for better testability"
+      
+      - pattern: "func\\s+\\w+\\s*\\([^)]*\\)\\s*[^{]*{[^}]*os\\.(?:Open|Create|Remove)[^}]*}"
+        message: "File operations should be abstracted behind interfaces for testing"
+      
+      - pattern: "func\\s+\\w+\\s*\\([^)]*\\)\\s*[^{]*{[^}]*time\\.Now\\(\\)[^}]*}"
+        message: "Consider injecting time.Now as a parameter for deterministic testing"
+      
+      - pattern: "var\\s+\\w+\\s+=[^=]"
+        message: "Package-level variables make testing harder. Consider moving state into structs"
+      
+      - pattern: "func\\s+\\w+\\s*\\([^)]{100,}\\)"
+        message: "Large parameter lists reduce testability. Consider grouping parameters into a config/options struct"
+
+examples:
+  - description: "Testable function with dependency injection"
+    input: |
+      type Service struct {
+          db     Database
+          logger Logger
+          client HTTPClient
+      }
+      
+      func NewService(db Database, logger Logger, client HTTPClient) *Service {
+          return &Service{
+              db:     db,
+              logger: logger,
+              client: client,
+          }
+      }
+      
+      func (s *Service) ProcessData(ctx context.Context, data []byte) error {
+          // Implementation
+      }
+      
+      // Test file
+      func TestService_ProcessData(t *testing.T) {
+          tests := []struct {
+              name    string
+              data    []byte
+              mockDB  func(m *MockDatabase)
+              wantErr bool
+          }{
+              // Test cases
+          }
+          
+          for _, tt := range tests {
+              t.Run(tt.name, func(t *testing.T) {
+                  // Test implementation
+              })
+          }
+      }
+    output: "Well-structured testable code with corresponding test"
+
+  - description: "Time-dependent function made testable"
+    input: |
+      type TimeProvider interface {
+          Now() time.Time
+      }
+      
+      func ProcessWithDeadline(ctx context.Context, tp TimeProvider, data []byte) error {
+          deadline := tp.Now().Add(5 * time.Second)
+          // Implementation
+      }
+      
+      // In tests:
+      type mockTime struct {
+          current time.Time
+      }
+      
+      func (m mockTime) Now() time.Time {
+          return m.current
+      }
+    output: "Time-dependent code made testable through abstraction"
+
+metadata:
+  priority: high
+  version: 1.0
+  tags:
+    - testing
+    - best-practices
+    - code-quality
+    - tdd
+    - unit-tests
+  author: "Claude"
+  last_updated: "2024-03-19"
+  related_rules:
+    - expert-golang
+  recommended_resources:
+    - "https://golang.org/doc/tutorial/add-a-test"
+    - "https://github.com/golang/go/wiki/TableDrivenTests"
+    - "https://github.com/stretchr/testify"
+</rule> 

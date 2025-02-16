@@ -1,0 +1,156 @@
+---
+description: 
+globs: 
+---
+<rule>
+name: gitignore-maintenance
+description: >
+  Ensures that .gitignore is properly maintained for Go projects, including:
+  1. Common Go-specific patterns
+  2. IDE and editor files
+  3. Build artifacts and binaries
+  4. Test coverage files
+  5. Environment and secret files
+
+filters:
+  - type: file_extension
+    pattern: "\\.go$"
+  - type: file_path
+    pattern: "\\.gitignore$"
+  - type: content
+    pattern: "(?i)\\b(binary|build|vendor|env|secret|coverage|ide|editor)\\b"
+  - type: event
+    pattern: "file_create|file_modify"
+
+actions:
+  - type: suggest
+    message: |
+      Ensure your .gitignore includes these common Go patterns:
+      
+      Go Specific:
+      - /bin/
+      - /vendor/
+      - *.exe
+      - *.exe~
+      - *.dll
+      - *.so
+      - *.dylib
+      - *.test
+      - *.out
+      
+      Go Coverage and Profiling:
+      - coverage.txt
+      - coverage.html
+      - profile.out
+      - cpu.prof
+      - mem.prof
+      
+      IDE and Editors:
+      - .idea/
+      - .vscode/
+      - *.swp
+      - *.swo
+      - *~
+      
+      Environment and Secrets:
+      - .env
+      - .env.local
+      - *.pem
+      - *.key
+      
+      Build and Dependencies:
+      - dist/
+      - build/
+      - tmp/
+      - .tmp/
+
+  - type: lint
+    conditions:
+      - pattern: "^(?!.*\\.gitignore).*\\.(env|pem|key)$"
+        message: "Sensitive files detected. Add them to .gitignore"
+      
+      - pattern: "^(?!.*\\.gitignore).*\\.(exe|dll|so|dylib)$"
+        message: "Binary files detected. Add them to .gitignore"
+      
+      - pattern: "^(?!.*\\.gitignore).*(coverage\\.txt|profile\\.out)$"
+        message: "Test artifacts detected. Add them to .gitignore"
+
+examples:
+  - description: "Complete .gitignore for Go projects"
+    input: |
+      # Binaries for programs and plugins
+      *.exe
+      *.exe~
+      *.dll
+      *.so
+      *.dylib
+
+      # Test binary, built with `go test -c`
+      *.test
+
+      # Output of the go coverage tool
+      *.out
+      coverage.txt
+      coverage.html
+
+      # Dependency directories
+      vendor/
+      
+      # Build directories
+      bin/
+      dist/
+      build/
+      
+      # IDE directories
+      .idea/
+      .vscode/
+      
+      # Environment files
+      .env
+      .env.local
+      .env.*
+      
+      # Editor backup files
+      *~
+      *.swp
+      *.swo
+      
+      # Temporary files
+      tmp/
+      .tmp/
+      
+      # Debug files
+      *.log
+      debug/
+      
+      # Certificate files
+      *.pem
+      *.key
+      *.crt
+    output: "Comprehensive .gitignore with all recommended patterns"
+
+  - description: "Basic .gitignore missing important patterns"
+    input: |
+      *.exe
+      vendor/
+    output: "Basic .gitignore that needs additional patterns"
+
+metadata:
+  priority: high
+  version: 1.0
+  tags:
+    - git
+    - security
+    - best-practices
+    - go
+  author: "Claude"
+  last_updated: "2024-03-19"
+  recommended_patterns:
+    - binary: ["*.exe", "*.dll", "*.so", "*.dylib"]
+    - testing: ["*.test", "*.out", "coverage.*"]
+    - environment: [".env", "*.pem", "*.key"]
+    - editor: [".idea/", ".vscode/", "*.swp"]
+    - build: ["bin/", "dist/", "build/"]
+  security_level: "high"
+  update_frequency: "on_new_file_types"
+</rule> 

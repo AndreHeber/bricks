@@ -1,0 +1,98 @@
+<rule>
+name: focused-task-handling
+description: >
+  Enforces a structured approach to task handling where the assistant must:
+  1. Focus solely on the specific task requested
+  2. Clarify requirements before implementation
+  3. Complete features fully when implementation is needed
+  4. Avoid premature implementation or scope creep
+
+filters:
+  - type: content
+    pattern: "(?i)\\b(implement|create|add|build|develop|write|code|make)\\b"
+  - type: content
+    pattern: "(?i)\\b(how|what|when|where|why|should|could|would|can|will)\\b"
+  - type: content
+    pattern: "(?i)\\b(feature|functionality|requirement|task|todo|issue)\\b"
+
+actions:
+  - type: suggest
+    message: |
+      Task Processing Approach:
+      
+      1. Clarification Phase:
+         - Identify unclear requirements
+         - Ask specific questions
+         - Confirm assumptions
+         - Define scope boundaries
+      
+      2. Confirmation Phase:
+         - Summarize understanding
+         - Get explicit approval
+         - Document key decisions
+      
+      3. Implementation Phase (when approved):
+         - Complete the entire feature
+         - Include all necessary components
+         - Ensure proper error handling
+         - Add necessary documentation
+
+  - type: lint
+    conditions:
+      - pattern: "(?i)\\b(maybe|probably|might|could|should)\\b"
+        message: "Uncertainty detected. Clarify requirements before proceeding"
+      
+      - pattern: "(?i)\\b(also|additionally|moreover|furthermore)\\b.*\\b(implement|create|add)\\b"
+        message: "Avoid scope creep. Focus on the primary task first"
+      
+      - pattern: "(?i)\\b(partial|incomplete|todo|later)\\b"
+        message: "Implementations should be complete. Identify blocking issues or requirements"
+
+examples:
+  - description: "Proper task clarification"
+    input: |
+      User: "Add authentication to the API"
+      Assistant: "Before implementing, I need to clarify:
+      1. What authentication method is preferred (JWT, session, OAuth)?
+      2. Are there specific security requirements?
+      3. What user data needs to be stored?
+      4. How should token expiration be handled?
+      
+      Please provide these details so I can suggest an appropriate implementation."
+    output: "Appropriate clarification before implementation"
+
+  - description: "Focused implementation"
+    input: |
+      User: "Add input validation for the user registration form"
+      Assistant: "I understand you need input validation for user registration.
+      To ensure I provide exactly what's needed:
+      1. Which fields need validation?
+      2. What are the validation rules for each field?
+      3. Should validation be client-side, server-side, or both?
+      4. How should validation errors be displayed?"
+    output: "Proper scope definition and requirement gathering"
+
+metadata:
+  priority: high
+  version: 1.0
+  tags:
+    - task-management
+    - requirements
+    - clarification
+    - implementation
+    - best-practices
+  author: "Claude"
+  last_updated: "2024-03-19"
+  enforcement_level: "strict"
+  clarification_timeout: "until requirements are clear"
+  implementation_requirements:
+    - "All requirements must be clear"
+    - "Scope must be well-defined"
+    - "Implementation must be complete"
+    - "No TODOs or partial solutions"
+  recommended_practices:
+    - "Ask questions before implementing"
+    - "Confirm understanding explicitly"
+    - "Complete features fully"
+    - "Document assumptions"
+</rule> 

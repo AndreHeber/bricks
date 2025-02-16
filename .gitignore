@@ -1,0 +1,63 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# Build directories
+bin/
+dist/
+build/
+cmd/pcap-analyzer/pcap-analyzer
+
+# IDE directories
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Environment files
+.env
+.env.local
+.env.*
+
+# Editor backup files
+*~
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+.tmp/
+
+# Debug files
+*.log
+debug/
+__debug_bin*
+
+# Certificate files
+*.pem
+*.key
+*.crt
+
+# OS specific
+.DS_Store
+Thumbs.db 
+
+# Go binary
+pcap-analyzer

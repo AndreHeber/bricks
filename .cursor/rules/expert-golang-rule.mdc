@@ -1,0 +1,139 @@
+---
+description: 
+globs: 
+---
+<rule>
+name: expert-golang
+description: >
+  This rule establishes comprehensive Golang expertise, covering idiomatic Go patterns, 
+  performance optimization, concurrency best practices, and modern Go development techniques. 
+  It includes deep knowledge of the Go standard library, popular frameworks, and tools 
+  in the Go ecosystem.
+filters:
+  - type: content
+    pattern: "(?i)\\b(golang|go|gofmt|gomod|goroutine|channel|interface|struct|slice|map|defer|panic|recover|context|gin|echo|fiber|gorm|sqlx|mutex|waitgroup|select|go\\.mod|go\\.sum|testify|gomock|wire|cobra|viper|zap|logrus|chi|mux|grpc|protobuf|docker|kubernetes|helm|prometheus|grafana)\\b"
+  - type: content
+    pattern: "(?i)\\b(concurrent|race condition|deadlock|memory leak|performance|optimization|profiling|pprof|trace|benchmark|test|mock|dependency injection|microservice|monolith|clean architecture|solid|design pattern|rest|graphql)\\b"
+  - type: file_extension
+    pattern: "\\.(go|mod|sum|proto|tmpl|gotmpl|yaml|yml)$"
+  - type: content
+    pattern: "(package\\s+\\w+|go\\s+test|go\\s+run|go\\s+build|go\\s+mod|func\\s+\\w+\\s*\\(|type\\s+\\w+\\s+struct|interface\\s*{)"
+actions:
+  - type: suggest
+    message: |
+      Detected a query related to Golang. With my expert knowledge in Golang, I'm ready to provide advanced guidance and in-depth analysis on your query.
+      
+      I can help with:
+      Architecture & Design:
+      - Clean Architecture and SOLID principles in Go
+      - Microservices vs Monolithic architecture
+      - Domain-Driven Design (DDD) implementation
+      - RESTful API design and implementation
+      - gRPC service design and protobuf
+      
+      Concurrency & Performance:
+      - Goroutines and channels best practices
+      - Sync package (Mutex, WaitGroup, Once, Pool)
+      - Context usage and cancellation patterns
+      - Race condition detection and prevention
+      - Memory optimization and garbage collection
+      - Performance profiling with pprof
+      
+      Testing & Quality:
+      - Unit, integration, and end-to-end testing
+      - Table-driven tests and subtests
+      - Mocking with testify/mock and gomock
+      - Benchmarking and performance testing
+      - Code coverage and quality metrics
+      
+      Tools & Ecosystem:
+      - Dependency management with go modules
+      - Popular frameworks (Gin, Echo, Fiber)
+      - ORMs and database access (GORM, SQLx)
+      - Logging and monitoring (Zap, Logrus)
+      - Docker and Kubernetes deployment
+      - CI/CD practices for Go applications
+
+  - type: lint
+    conditions:
+      - pattern: "(?i)\\bgo\\s*routine\\b"
+        message: "Use 'goroutine' (one word) instead of 'go routine' - this is the correct Go terminology"
+      - pattern: "if\\s+err\\s*!=\\s*nil\\s*{\\s*return\\s+err\\s*}"
+        message: "Consider adding context to error returns using fmt.Errorf() or errors.Wrap(). See https://pkg.go.dev/errors for best practices"
+      - pattern: "var\\s+\\w+\\s+map\\[\\w+\\]\\w+"
+        message: "Maps should be initialized using make() to avoid nil map panics. Example: myMap := make(map[string]int)"
+      - pattern: "for\\s+\\w+\\s*:=\\s*range.*{[^}]*go\\s+func"
+        message: "Be careful with goroutines in loops. Use a local variable to capture the loop variable or pass it as parameter"
+      - pattern: "time\\.Sleep\\("
+        message: "Avoid time.Sleep in production code. Consider using proper synchronization mechanisms or channels"
+      - pattern: "\\w+\\s*:=\\s*make\\(chan\\s+\\w+\\)"
+        message: "Consider specifying channel buffer size explicitly for better control over channel behavior"
+      - pattern: "defer\\s+\\w+\\.Close\\(\\)"
+        message: "Check for possible errors in deferred Close() calls. Consider using a named error return"
+      - pattern: "json\\.Marshal\\(.*\\)"
+        message: "Consider using json.MarshalIndent() for debug/logging scenarios or custom MarshalJSON() for better control"
+
+examples:
+  - description: "Error handling best practices"
+    input: |
+      func ProcessData(ctx context.Context, data []byte) error {
+          if err := validate(data); err != nil {
+              return fmt.Errorf("validating data: %w", err)
+          }
+          
+          result, err := process(ctx, data)
+          if err != nil {
+              return fmt.Errorf("processing data: %w", err)
+          }
+          
+          return nil
+      }
+    output: "Proper error handling with context and wrapping"
+
+  - description: "Concurrent safe data structure"
+    input: |
+      type SafeCounter struct {
+          mu    sync.Mutex
+          count map[string]int
+      }
+
+      func (c *SafeCounter) Increment(key string) {
+          c.mu.Lock()
+          defer c.mu.Unlock()
+          c.count[key]++
+      }
+    output: "Thread-safe counter implementation using mutex"
+
+  - description: "Context usage pattern"
+    input: |
+      func ProcessWithTimeout(data []byte) error {
+          ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+          defer cancel()
+          
+          return processWithContext(ctx, data)
+      }
+    output: "Proper context usage with timeout and cancellation"
+
+metadata:
+  priority: high
+  version: 1.1
+  tags:
+    - golang
+    - concurrency
+    - performance
+    - testing
+    - architecture
+    - microservices
+    - best-practices
+    - error-handling
+    - dependency-injection
+    - clean-code
+  author: "Claude"
+  last_updated: "2024-03-19"
+  supported_go_versions: ["1.19", "1.20", "1.21", "1.22"]
+  recommended_resources:
+    - "https://go.dev/doc/effective_go"
+    - "https://github.com/golang-standards/project-layout"
+    - "https://golang.org/doc/diagnostics"
+    - "https://go.dev/blog/"
+</rule> 
