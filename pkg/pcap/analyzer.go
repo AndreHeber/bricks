@@ -310,8 +310,9 @@ func (g *CallGroup) BuildCallFlow() *CallFlow {
 				fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
 				toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
 			} else {
-				fromParticipant = flow.getOrCreateParticipant(toURI, srcAddr)
-				toParticipant = flow.getOrCreateParticipant(fromURI, dstAddr)
+				// For responses, maintain the logical From/To relationship from SIP headers
+				fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
+				toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
 			}
 		}
 
@@ -393,8 +394,8 @@ func (f *CallFlow) GenerateMermaid() string {
 		} else {
 			// Response: dotted arrow with status
 			msg := fmt.Sprintf("%d %s", interaction.Status, interaction.Method)
-			// For responses, the arrow goes from the responder to the requester
-			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", from, to, msg))
+			// For responses, swap From/To to show the response going from the responder to the requester
+			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", to, from, msg))
 		}
 	}
 
