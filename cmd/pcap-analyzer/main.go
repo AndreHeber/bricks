@@ -3,8 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/AndreHeber/pcap-analyzer/pkg/pcap"
 	"github.com/AndreHeber/pcap-analyzer/pkg/version"
@@ -84,6 +85,13 @@ func parseFlags() *Config {
 	return cfg
 }
 
+func parseTime(timeStr string) (time.Time, error) {
+	if timeStr == "" {
+		return time.Time{}, nil
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", timeStr, time.Local)
+}
+
 func main() {
 	cfg := parseFlags()
 
@@ -94,14 +102,97 @@ func main() {
 
 	analyzer := pcap.NewAnalyzer(100, logger)
 
-	analysis, err := analyzer.AnalyzeFile(cfg.inputFile)
-	if err != nil {
-		log.Fatalf("Error analyzing pcap file: %v", err)
+	// Add filters based on configuration
+	if cfg.filterCallID != "" {
+		analyzer.AddFilter(&pcap.CallIDFilter{CallID: cfg.filterCallID})
+		if cfg.debug {
+			logger.Info(fmt.Sprintf("Added Call-ID filter: %s", cfg.filterCallID))
+		}
 	}
 
-	// TODO: Apply filters based on cfg
-	// TODO: Generate Mermaid diagram
-	// TODO: Handle output to file if specified
+	if cfg.filterFrom != "" || cfg.filterTo != "" {
+		analyzer.AddFilter(&pcap.AddressFilter{
+			From: cfg.filterFrom,
+			To:   cfg.filterTo,
+		})
+		if cfg.debug {
+			logger.Info(fmt.Sprintf("Added address filter - From: %s, To: %s", cfg.filterFrom, cfg.filterTo))
+		}
+	}
 
-	analysis.Print()
+	startTime, err := parseTime(cfg.timeStart)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Invalid start time format: %v", err))
+		os.Exit(1)
+	}
+
+	endTime, err := parseTime(cfg.timeEnd)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Invalid end time format: %v", err))
+		os.Exit(1)
+	}
+
+	if !startTime.IsZero() || !endTime.IsZero() {
+		analyzer.AddFilter(&pcap.TimeRangeFilter{
+			Start: startTime,
+			End:   endTime,
+		})
+		if cfg.debug {
+			logger.Info(fmt.Sprintf("Added time filter - Start: %v, End: %v", startTime, endTime))
+		}
+	}
+
+	// Analyze PCAP file
+	analysis, err := analyzer.AnalyzeFile(cfg.inputFile)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Error analyzing pcap file: %v", err))
+		os.Exit(1)
+	}
+
+	if len(analysis.Packets) == 0 {
+		logger.Error("No SIP packets found in the capture")
+		os.Exit(1)
+	}
+
+	if cfg.debug {
+		logger.Info(fmt.Sprintf("Found %d SIP packets", len(analysis.Packets)))
+	}
+
+	// Group packets by call and generate Mermaid diagrams
+	groups := analysis.GroupByCall()
+	if len(groups) == 0 {
+		logger.Error("No SIP calls found in the capture")
+		os.Exit(1)
+	}
+
+	if cfg.debug {
+		logger.Info(fmt.Sprintf("Found %d SIP calls", len(groups)))
+	}
+
+	// Generate Mermaid diagrams for each call
+	var output strings.Builder
+	for callID, group := range groups {
+		if cfg.debug {
+			logger.Info(fmt.Sprintf("Generating diagram for call: %s", callID))
+		}
+
+		flow := group.BuildCallFlow()
+		diagram := flow.GenerateMermaid()
+		output.WriteString(diagram)
+		output.WriteString("\n\n")
+	}
+
+	// Handle output
+	if cfg.outputFile != "" {
+		err = os.WriteFile(cfg.outputFile, []byte(output.String()), 0644)
+		if err != nil {
+			logger.Error(fmt.Sprintf("Error writing output file: %v", err))
+			os.Exit(1)
+		}
+		if cfg.debug {
+			logger.Info(fmt.Sprintf("Output written to: %s", cfg.outputFile))
+		}
+	} else {
+		fmt.Println(output.String())
+	}
 } 
