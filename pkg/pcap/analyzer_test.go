@@ -12,15 +12,25 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
+// MockLogger implements the Logger interface for testing
 type MockLogger struct {
-	mock.Mock
+	infoMsgs  []string
+	errorMsgs []string
 }
 
-func (m *MockLogger) Info(msg string)  { m.Called(msg) }
-func (m *MockLogger) Error(msg string) { m.Called(msg) }
+func (m *MockLogger) Info(msg string)  { m.infoMsgs = append(m.infoMsgs, msg) }
+func (m *MockLogger) Error(msg string) { m.errorMsgs = append(m.errorMsgs, msg) }
+
+// MockFilter implements the PacketFilter interface for testing
+type MockFilter struct {
+	shouldMatch bool
+}
+
+func (f *MockFilter) Match(packet *SIPPacket) bool {
+	return f.shouldMatch
+}
 
 func TestProcessPacket(t *testing.T) {
 	tests := []struct {
@@ -259,5 +269,149 @@ func TestAnalysis_Print(t *testing.T) {
 
 	for _, expected := range expectedStrings {
 		assert.Contains(t, output, expected, "Output should contain %q", expected)
+	}
+}
+
+func TestAnalyzer_AddFilter(t *testing.T) {
+	logger := &MockLogger{}
+	analyzer := NewAnalyzer(100, logger)
+
+	filter1 := &MockFilter{shouldMatch: true}
+	filter2 := &MockFilter{shouldMatch: false}
+
+	analyzer.AddFilter(filter1)
+	analyzer.AddFilter(filter2)
+
+	if len(analyzer.filters) != 2 {
+		t.Errorf("Expected 2 filters, got %d", len(analyzer.filters))
+	}
+}
+
+func TestAnalyzer_MatchesFilters(t *testing.T) {
+	logger := &MockLogger{}
+	analyzer := NewAnalyzer(100, logger)
+
+	packet := &SIPPacket{
+		PacketInfo: PacketInfo{
+			Timestamp: time.Now(),
+			SrcIP:     "192.168.1.1",
+			DstIP:     "192.168.1.2",
+		},
+		Method: "INVITE",
+	}
+
+	// Test with no filters
+	if !analyzer.matchesFilters(packet) {
+		t.Error("Expected packet to match with no filters")
+	}
+
+	// Test with matching filter
+	analyzer.AddFilter(&MockFilter{shouldMatch: true})
+	if !analyzer.matchesFilters(packet) {
+		t.Error("Expected packet to match with true filter")
+	}
+
+	// Test with non-matching filter
+	analyzer.AddFilter(&MockFilter{shouldMatch: false})
+	if analyzer.matchesFilters(packet) {
+		t.Error("Expected packet to not match with false filter")
+	}
+}
+
+func TestAnalyzer_ProcessSIPPacket(t *testing.T) {
+	logger := &MockLogger{}
+	analyzer := NewAnalyzer(100, logger)
+
+	// Create a mock packet with SIP payload
+	payload := []byte("INVITE sip:bob@biloxi.com SIP/2.0\r\n" +
+		"Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n" +
+		"To: Bob <sip:bob@biloxi.com>\r\n" +
+		"From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n" +
+		"Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n" +
+		"CSeq: 314159 INVITE\r\n" +
+		"Content-Length: 0\r\n\r\n")
+
+	// Create IP layer
+	ip := &layers.IPv4{
+		SrcIP: []byte{192, 168, 1, 1},
+		DstIP: []byte{192, 168, 1, 2},
+	}
+
+	// Create UDP layer
+	udp := &layers.UDP{
+		SrcPort: layers.UDPPort(5060),
+		DstPort: layers.UDPPort(5060),
+	}
+	udp.SetNetworkLayerForChecksum(ip)
+
+	// Create packet
+	buffer := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{ComputeChecksums: true}
+	err := gopacket.SerializeLayers(buffer, opts,
+		ip,
+		udp,
+		gopacket.Payload(payload),
+	)
+	if err != nil {
+		t.Fatalf("Failed to serialize packet: %v", err)
+	}
+
+	packet := gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeIPv4, gopacket.Default)
+	
+	// Process the packet
+	sipPacket, err := analyzer.processSIPPacket(packet)
+	if err != nil {
+		t.Fatalf("Failed to process SIP packet: %v", err)
+	}
+
+	// Verify the processed packet
+	if sipPacket == nil {
+		t.Fatal("Expected non-nil SIP packet")
+	}
+
+	tests := []struct {
+		name string
+		got  interface{}
+		want interface{}
+	}{
+		{"SrcIP", sipPacket.SrcIP, "192.168.1.1"},
+		{"DstIP", sipPacket.DstIP, "192.168.1.2"},
+		{"SrcPort", sipPacket.SrcPort, uint16(5060)},
+		{"DstPort", sipPacket.DstPort, uint16(5060)},
+		{"Protocol", sipPacket.Protocol, "SIP"},
+		{"Method", sipPacket.Method, "INVITE"},
+		{"IsRequest", sipPacket.IsRequest, true},
+		{"CallID", sipPacket.CallID, "a84b4c76e66710@pc33.atlanta.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("%s = %v; want %v", tt.name, tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnalysis_AddPacket(t *testing.T) {
+	analysis := NewAnalysis()
+	
+	packet := &SIPPacket{
+		PacketInfo: PacketInfo{
+			Timestamp: time.Now(),
+			SrcIP:     "192.168.1.1",
+			DstIP:     "192.168.1.2",
+		},
+		Method: "INVITE",
+	}
+
+	analysis.AddPacket(packet)
+
+	if len(analysis.Packets) != 1 {
+		t.Errorf("Expected 1 packet, got %d", len(analysis.Packets))
+	}
+
+	if analysis.Packets[0] != packet {
+		t.Error("Stored packet does not match input packet")
 	}
 } 
