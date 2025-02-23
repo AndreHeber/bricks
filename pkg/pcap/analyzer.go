@@ -2,6 +2,7 @@ package pcap
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/AndreHeber/pcap-analyzer/pkg/sip"
@@ -178,6 +179,43 @@ func (a *Analyzer) processSIPPacket(packet gopacket.Packet) (*SIPPacket, error) 
 	}
 
 	return sipPacket, nil
+}
+
+// CallGroup represents a group of SIP packets belonging to the same call session
+type CallGroup struct {
+	CallID  string
+	Packets []*SIPPacket
+}
+
+// GroupByCall organizes packets by their Call-ID and sorts them chronologically
+func (a *Analysis) GroupByCall() map[string]*CallGroup {
+	groups := make(map[string]*CallGroup)
+
+	// Group packets by Call-ID
+	for _, packet := range a.Packets {
+		if packet.CallID == "" {
+			continue
+		}
+
+		group, exists := groups[packet.CallID]
+		if !exists {
+			group = &CallGroup{
+				CallID:  packet.CallID,
+				Packets: make([]*SIPPacket, 0),
+			}
+			groups[packet.CallID] = group
+		}
+		group.Packets = append(group.Packets, packet)
+	}
+
+	// Sort packets in each group by timestamp
+	for _, group := range groups {
+		sort.Slice(group.Packets, func(i, j int) bool {
+			return group.Packets[i].Timestamp.Before(group.Packets[j].Timestamp)
+		})
+	}
+
+	return groups
 }
 
 // Print outputs the analysis results

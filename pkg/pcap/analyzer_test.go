@@ -129,4 +129,86 @@ func TestAnalysis_Print(t *testing.T) {
 	
 	// Just verify that Print doesn't panic
 	analysis.Print()
+}
+
+func TestAnalysis_GroupByCall(t *testing.T) {
+	analysis := NewAnalysis()
+	
+	// Create test packets with different Call-IDs and timestamps
+	now := time.Now()
+	packets := []*SIPPacket{
+		{
+			PacketInfo: PacketInfo{
+				Timestamp: now.Add(2 * time.Second),
+				SrcIP:     "192.168.1.1",
+				DstIP:     "192.168.1.2",
+			},
+			Method:    "BYE",
+			CallID:    "call-1",
+			IsRequest: true,
+		},
+		{
+			PacketInfo: PacketInfo{
+				Timestamp: now,
+				SrcIP:     "192.168.1.1",
+				DstIP:     "192.168.1.2",
+			},
+			Method:    "INVITE",
+			CallID:    "call-1",
+			IsRequest: true,
+		},
+		{
+			PacketInfo: PacketInfo{
+				Timestamp: now.Add(time.Second),
+				SrcIP:     "192.168.1.2",
+				DstIP:     "192.168.1.1",
+			},
+			Method:     "INVITE",
+			StatusCode: 200,
+			StatusDesc: "OK",
+			CallID:     "call-1",
+			IsRequest:  false,
+		},
+		{
+			PacketInfo: PacketInfo{
+				Timestamp: now,
+				SrcIP:     "192.168.1.3",
+				DstIP:     "192.168.1.4",
+			},
+			Method:    "REGISTER",
+			CallID:    "call-2",
+			IsRequest: true,
+		},
+	}
+
+	// Add packets to analysis
+	for _, packet := range packets {
+		analysis.AddPacket(packet)
+	}
+
+	// Group packets by call
+	groups := analysis.GroupByCall()
+
+	// Verify number of groups
+	assert.Len(t, groups, 2, "Expected 2 call groups")
+
+	// Verify call-1 group
+	call1Group, exists := groups["call-1"]
+	assert.True(t, exists, "Expected call-1 group to exist")
+	assert.Equal(t, "call-1", call1Group.CallID)
+	assert.Len(t, call1Group.Packets, 3)
+
+	// Verify chronological order of call-1 packets
+	assert.Equal(t, "INVITE", call1Group.Packets[0].Method)
+	assert.True(t, call1Group.Packets[0].IsRequest)
+	assert.Equal(t, "INVITE", call1Group.Packets[1].Method)
+	assert.False(t, call1Group.Packets[1].IsRequest)
+	assert.Equal(t, "BYE", call1Group.Packets[2].Method)
+
+	// Verify call-2 group
+	call2Group, exists := groups["call-2"]
+	assert.True(t, exists, "Expected call-2 group to exist")
+	assert.Equal(t, "call-2", call2Group.CallID)
+	assert.Len(t, call2Group.Packets, 1)
+	assert.Equal(t, "REGISTER", call2Group.Packets[0].Method)
 } 
