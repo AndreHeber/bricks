@@ -306,6 +306,68 @@ func extractParticipantInfo(sipAddr, ip string, port uint16) (uri, addr string) 
 	return uri, addr
 }
 
+// GenerateMermaid generates a Mermaid sequence diagram from the call flow
+func (f *CallFlow) GenerateMermaid() string {
+	var b strings.Builder
+
+	// Start sequence diagram
+	b.WriteString("sequenceDiagram\n")
+	b.WriteString("    title SIP Call Flow - " + f.CallID + "\n\n")
+
+	// Add participants
+	for _, p := range f.Participants {
+		// Use URI as participant name, fallback to address if URI is empty
+		name := p.URI
+		if name == "" {
+			name = p.Address
+		}
+		// Clean up the name for Mermaid
+		name = cleanMermaidName(name)
+		b.WriteString(fmt.Sprintf("    participant %s\n", name))
+	}
+	b.WriteString("\n")
+
+	// Add interactions
+	for _, interaction := range f.Interactions {
+		from := cleanMermaidName(getParticipantName(interaction.From))
+		to := cleanMermaidName(getParticipantName(interaction.To))
+
+		if interaction.IsRequest {
+			// Request: solid arrow
+			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", from, to, interaction.Method))
+		} else {
+			// Response: dotted arrow with status
+			msg := fmt.Sprintf("%d %s", interaction.Status, interaction.Method)
+			b.WriteString(fmt.Sprintf("    %s-->%s: %s\n", to, from, msg))
+		}
+	}
+
+	return b.String()
+}
+
+// getParticipantName returns the best name to use for a participant
+func getParticipantName(p *Participant) string {
+	if p.URI != "" {
+		return p.URI
+	}
+	return p.Address
+}
+
+// cleanMermaidName makes a string safe for use in Mermaid diagrams
+func cleanMermaidName(s string) string {
+	// Replace special characters that could break Mermaid syntax
+	s = strings.ReplaceAll(s, "<", "")
+	s = strings.ReplaceAll(s, ">", "")
+	s = strings.ReplaceAll(s, " ", "_")
+	s = strings.ReplaceAll(s, "@", "_at_")
+	s = strings.ReplaceAll(s, ":", "_")
+	s = strings.ReplaceAll(s, ";", "_")
+	s = strings.ReplaceAll(s, ",", "_")
+	s = strings.ReplaceAll(s, ".", "_")
+	s = strings.ReplaceAll(s, "=", "_")
+	return s
+}
+
 // Print outputs the analysis results
 func (a *Analysis) Print() {
 	fmt.Printf("Found %d SIP packets\n\n", len(a.Packets))

@@ -356,4 +356,132 @@ func TestExtractParticipantInfo(t *testing.T) {
 			assert.Equal(t, tt.expectedAddr, addr)
 		})
 	}
+}
+
+func TestCallFlow_GenerateMermaid(t *testing.T) {
+	// Create a test call flow
+	flow := &CallFlow{
+		CallID: "test-call-1",
+		Participants: map[string]*Participant{
+			"sip:alice@atlanta.com": {
+				URI:     "sip:alice@atlanta.com",
+				Address: "192.168.1.1:5060",
+			},
+			"sip:bob@biloxi.com": {
+				URI:     "sip:bob@biloxi.com",
+				Address: "192.168.1.2:5060",
+			},
+		},
+		Interactions: []*Interaction{
+			{
+				Timestamp: time.Now(),
+				From: &Participant{
+					URI:     "sip:alice@atlanta.com",
+					Address: "192.168.1.1:5060",
+				},
+				To: &Participant{
+					URI:     "sip:bob@biloxi.com",
+					Address: "192.168.1.2:5060",
+				},
+				Method:    "INVITE",
+				IsRequest: true,
+			},
+			{
+				Timestamp: time.Now().Add(time.Second),
+				From: &Participant{
+					URI:     "sip:alice@atlanta.com",
+					Address: "192.168.1.1:5060",
+				},
+				To: &Participant{
+					URI:     "sip:bob@biloxi.com",
+					Address: "192.168.1.2:5060",
+				},
+				Method:    "INVITE",
+				Status:    200,
+				IsRequest: false,
+			},
+		},
+	}
+
+	mermaid := flow.GenerateMermaid()
+
+	// Verify Mermaid diagram structure
+	assert.Contains(t, mermaid, "sequenceDiagram")
+	assert.Contains(t, mermaid, "title SIP Call Flow - test-call-1")
+
+	// Verify participants
+	assert.Contains(t, mermaid, "participant sip_alice_at_atlanta_com")
+	assert.Contains(t, mermaid, "participant sip_bob_at_biloxi_com")
+
+	// Verify interactions
+	assert.Contains(t, mermaid, "sip_alice_at_atlanta_com->>sip_bob_at_biloxi_com: INVITE")
+	assert.Contains(t, mermaid, "sip_bob_at_biloxi_com-->sip_alice_at_atlanta_com: 200 INVITE")
+}
+
+func TestCleanMermaidName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "SIP URI",
+			input:    "sip:alice@atlanta.com",
+			expected: "sip_alice_at_atlanta_com",
+		},
+		{
+			name:     "Full SIP address",
+			input:    "Alice <sip:alice@atlanta.com>",
+			expected: "Alice_sip_alice_at_atlanta_com",
+		},
+		{
+			name:     "IP address",
+			input:    "192.168.1.1:5060",
+			expected: "192_168_1_1_5060",
+		},
+		{
+			name:     "Special characters",
+			input:    "user;tag=1234,branch=xyz",
+			expected: "user_tag_1234_branch_xyz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cleanMermaidName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetParticipantName(t *testing.T) {
+	tests := []struct {
+		name     string
+		p        *Participant
+		expected string
+	}{
+		{
+			name: "URI present",
+			p: &Participant{
+				URI:     "sip:alice@atlanta.com",
+				Address: "192.168.1.1:5060",
+			},
+			expected: "sip:alice@atlanta.com",
+		},
+		{
+			name: "URI empty",
+			p: &Participant{
+				URI:     "",
+				Address: "192.168.1.1:5060",
+			},
+			expected: "192.168.1.1:5060",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getParticipantName(tt.p)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 } 
