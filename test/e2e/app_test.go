@@ -87,4 +87,41 @@ func TestAnalyzer_E2E(t *testing.T) {
 			assert.Contains(t, diagram, "sip_server_at_172_16_98_101->>sip_telephone1_at_172_16_98_101_transport_UDP: 200")
 		}
 	})
+
+	t.Run("subscribe.pcap", func(t *testing.T) {
+		// Test file analysis
+		analysis, err := analyzer.AnalyzeFile("../../test/data/subscribe.pcap")
+		if err != nil {
+			t.Fatalf("Failed to analyze file: %v", err)
+		}
+
+		// Verify basic packet analysis
+		assert.NotEmpty(t, analysis.Packets, "Expected packets in analysis")
+		
+		// Verify first packet is a SUBSCRIBE request
+		if assert.NotEmpty(t, analysis.Packets) {
+			packet := analysis.Packets[0]
+			assert.Equal(t, "SUBSCRIBE", packet.Method)
+			assert.True(t, packet.IsRequest)
+			assert.NotEmpty(t, packet.CallID)
+		}
+
+		// Verify call flow
+		groups := analysis.GroupByCall()
+		assert.Len(t, groups, 1, "Expected one call")
+
+		for _, group := range groups {
+			flow := group.BuildCallFlow(logger)
+			diagram := flow.GenerateMermaid()
+
+			// Verify diagram structure
+			assert.Contains(t, diagram, "sequenceDiagram")
+			assert.Contains(t, diagram, "participant sip_telephone2_at_172_16_98_101_transport_UDP")
+			assert.Contains(t, diagram, "participant sip_server_at_172_16_98_101")
+			assert.Contains(t, diagram, "sip_telephone2_at_172_16_98_101_transport_UDP->>sip_server_at_172_16_98_101: SUBSCRIBE")
+			assert.Contains(t, diagram, "sip_server_at_172_16_98_101->>sip_telephone2_at_172_16_98_101_transport_UDP: 401")
+			assert.Contains(t, diagram, "sip_telephone2_at_172_16_98_101_transport_UDP->>sip_server_at_172_16_98_101: SUBSCRIBE")
+			assert.Contains(t, diagram, "sip_server_at_172_16_98_101->>sip_telephone2_at_172_16_98_101_transport_UDP: 489")
+		}
+	})
 }
