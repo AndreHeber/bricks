@@ -243,7 +243,7 @@ type Interaction struct {
 }
 
 // BuildCallFlow creates a CallFlow from a group of SIP packets
-func (g *CallGroup) BuildCallFlow() *CallFlow {
+func (g *CallGroup) BuildCallFlow(logger Logger) *CallFlow {
 	flow := &CallFlow{
 		CallID:       g.CallID,
 		Participants: make(map[string]*Participant),
@@ -260,15 +260,26 @@ func (g *CallGroup) BuildCallFlow() *CallFlow {
 		srcAddr := fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
 		dstAddr := fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
 
-		fmt.Printf("\nProcessing packet:\n")
-		fmt.Printf("  IsRequest: %v\n", packet.IsRequest)
-		fmt.Printf("  Method: %s\n", packet.Method)
-		fmt.Printf("  CSeq: %s\n", packet.CSeq)
-		fmt.Printf("  Status: %d\n", packet.StatusCode)
-		fmt.Printf("  From URI: %s\n", fromURI)
-		fmt.Printf("  To URI: %s\n", toURI)
-		fmt.Printf("  Source: %s\n", srcAddr)
-		fmt.Printf("  Destination: %s\n", dstAddr)
+		// Log packet details for debugging
+		if logger != nil {
+			logger.Info(fmt.Sprintf("\nProcessing packet:\n"+
+				"  IsRequest: %v\n"+
+				"  Method: %s\n"+
+				"  CSeq: %s\n"+
+				"  Status: %d\n"+
+				"  From URI: %s\n"+
+				"  To URI: %s\n"+
+				"  Source: %s\n"+
+				"  Destination: %s",
+				packet.IsRequest,
+				packet.Method,
+				packet.CSeq,
+				packet.StatusCode,
+				fromURI,
+				toURI,
+				srcAddr,
+				dstAddr))
+		}
 
 		// Determine if the source or destination is a proxy server
 		isProxySource := strings.Contains(srcAddr, ":5080")

@@ -265,7 +265,7 @@ func TestCallGroup_BuildCallFlow(t *testing.T) {
 		},
 	}
 
-	flow := group.BuildCallFlow()
+	flow := group.BuildCallFlow(nil)
 
 	// Verify call flow basics
 	assert.Equal(t, "test-call-1", flow.CallID)

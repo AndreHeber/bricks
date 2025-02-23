@@ -178,7 +178,11 @@ func main() {
 			logger.Info(fmt.Sprintf("Generating diagram for call: %s", callID))
 		}
 
-		flow := group.BuildCallFlow()
+		var debugLogger pcap.Logger
+		if cfg.debug && logger != nil {
+			debugLogger = logger
+		}
+		flow := group.BuildCallFlow(debugLogger)
 		diagram := flow.GenerateMermaid()
 		output.WriteString(diagram)
 		output.WriteString("\n\n")
