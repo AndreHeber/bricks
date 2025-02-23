@@ -2,10 +2,11 @@ package pcap
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/AndreHeber/pcap-analyzer/pkg/sip"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
 
@@ -22,32 +23,40 @@ type Packet struct {
 	SDPBody     string
 }
 
-// Analysis contains the results of a pcap analysis
-type Analysis struct {
-	FirstPacketTime time.Time
-	LastPacketTime  time.Time
-	PacketCount     int
-	UniqueAddresses map[string]struct{}
-	Packets         []Packet
-}
-
-// Logger interface for dependency injection of logging
+// Logger interface for outputting information
 type Logger interface {
 	Info(msg string)
 	Error(msg string)
 }
 
-// Analyzer handles pcap file analysis
+// Analysis represents the result of PCAP analysis
+type Analysis struct {
+	Packets []*SIPPacket
+}
+
+// NewAnalysis creates a new analysis instance
+func NewAnalysis() *Analysis {
+	return &Analysis{
+		Packets: make([]*SIPPacket, 0),
+	}
+}
+
+// AddPacket adds a packet to the analysis
+func (a *Analysis) AddPacket(packet *SIPPacket) {
+	a.Packets = append(a.Packets, packet)
+}
+
+// Analyzer handles PCAP file processing
 type Analyzer struct {
-	maxPackets int
+	bufferSize int
 	logger     Logger
 	filters    []PacketFilter
 }
 
-// NewAnalyzer creates a new pcap analyzer
-func NewAnalyzer(maxPackets int, logger Logger) *Analyzer {
+// NewAnalyzer creates a new PCAP analyzer
+func NewAnalyzer(bufferSize int, logger Logger) *Analyzer {
 	return &Analyzer{
-		maxPackets: maxPackets,
+		bufferSize: bufferSize,
 		logger:     logger,
 		filters:    make([]PacketFilter, 0),
 	}
@@ -58,11 +67,22 @@ func (a *Analyzer) AddFilter(filter PacketFilter) {
 	a.filters = append(a.filters, filter)
 }
 
-// AnalyzeFile analyzes a pcap file and returns the analysis results
-func (a *Analyzer) AnalyzeFile(filepath string) (*Analysis, error) {
-	handle, err := pcap.OpenOffline(filepath)
+// matchesFilters checks if a packet matches all configured filters
+func (a *Analyzer) matchesFilters(packet *SIPPacket) bool {
+	for _, filter := range a.filters {
+		if !filter.Match(packet) {
+			return false
+		}
+	}
+	return true
+}
+
+// AnalyzeFile processes a PCAP file and returns SIP packets
+func (a *Analyzer) AnalyzeFile(filename string) (*Analysis, error) {
+	// Open PCAP file
+	handle, err := pcap.OpenOffline(filename)
 	if err != nil {
-		return nil, fmt.Errorf("opening pcap file: %w", err)
+		return nil, fmt.Errorf("error opening pcap file: %v", err)
 	}
 	defer handle.Close()
 
@@ -72,188 +92,123 @@ func (a *Analyzer) AnalyzeFile(filepath string) (*Analysis, error) {
 		return nil, fmt.Errorf("error setting BPF filter: %v", err)
 	}
 
-	analysis := &Analysis{
-		UniqueAddresses: make(map[string]struct{}),
-		Packets:         make([]Packet, 0),
-	}
-
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	analysis := NewAnalysis()
+
 	for packet := range packetSource.Packets() {
-		if err := a.processPacket(packet, analysis); err != nil {
-			a.logger.Error(fmt.Sprintf("processing packet: %v", err))
+		sipPacket, err := a.processSIPPacket(packet)
+		if err != nil {
+			a.logger.Error(fmt.Sprintf("Error processing packet: %v", err))
 			continue
 		}
 
-		analysis.PacketCount++
-		if analysis.PacketCount >= a.maxPackets {
-			a.logger.Info(fmt.Sprintf("Reached maximum packet count of %d", a.maxPackets))
-			break
+		if sipPacket == nil {
+			continue
 		}
+
+		// Apply filters
+		if !a.matchesFilters(sipPacket) {
+			continue
+		}
+
+		analysis.AddPacket(sipPacket)
 	}
 
 	return analysis, nil
 }
 
-// parseSIPPacket parses SIP packet content
-func parseSIPPacket(payload []byte) (string, map[string]string, string) {
-	content := string(payload)
-	lines := strings.Split(content, "\r\n")
-	if len(lines) == 1 {
-		lines = strings.Split(content, "\n")
+// processSIPPacket extracts SIP information from a packet
+func (a *Analyzer) processSIPPacket(packet gopacket.Packet) (*SIPPacket, error) {
+	// Get IP layer
+	ipLayer := packet.Layer(layers.LayerTypeIPv4)
+	if ipLayer == nil {
+		return nil, nil // Not an IPv4 packet
 	}
+	ip, _ := ipLayer.(*layers.IPv4)
 
-	if len(lines) == 0 {
-		return "", nil, ""
-	}
+	// Get transport layer (TCP/UDP)
+	var payload []byte
+	var srcPort, dstPort uint16
 
-	// Parse first line for method
-	method := ""
-	if strings.HasPrefix(lines[0], "SIP/") {
-		// SIP/2.0 200 OK
-		responseCode := strings.Split(lines[0], " ")[1:]
-		// This is a response
-		method = "Response: " + strings.Join(responseCode, " ")
+	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		tcp, _ := tcpLayer.(*layers.TCP)
+		payload = tcp.Payload
+		srcPort = uint16(tcp.SrcPort)
+		dstPort = uint16(tcp.DstPort)
+	} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		udp, _ := udpLayer.(*layers.UDP)
+		payload = udp.Payload
+		srcPort = uint16(udp.SrcPort)
+		dstPort = uint16(udp.DstPort)
 	} else {
-		// This is a request
-		parts := strings.Split(lines[0], " ")
-		if len(parts) > 0 {
-			method = "Request: " + parts[0]
-		}
+		return nil, nil // Not TCP/UDP
 	}
 
-	// Parse headers
-	headers := make(map[string]string)
-	var sdpContent strings.Builder
-	isSDPContent := false
-
-	for _, line := range lines[1:] {
-		if line == "" {
-			isSDPContent = true
-			continue
-		}
-
-		if isSDPContent {
-			sdpContent.WriteString(line)
-			sdpContent.WriteString("\r\n")
-			continue
-		}
-
-		parts := strings.SplitN(line, ": ", 2)
-		if len(parts) == 2 {
-			headers[parts[0]] = parts[1]
-		}
+	if len(payload) == 0 {
+		return nil, nil // No payload
 	}
 
-	return method, headers, sdpContent.String()
+	// Parse SIP message
+	sipMsg, err := sip.ParseMessage(payload)
+	if err != nil {
+		return nil, fmt.Errorf("parsing SIP message: %v", err)
+	}
+
+	// Create SIP packet
+	sipPacket := &SIPPacket{
+		PacketInfo: PacketInfo{
+			Timestamp: packet.Metadata().Timestamp,
+			SrcIP:     ip.SrcIP.String(),
+			DstIP:     ip.DstIP.String(),
+			SrcPort:   srcPort,
+			DstPort:   dstPort,
+			Protocol:  "SIP",
+			Length:    uint32(len(payload)),
+			Payload:   payload,
+		},
+		IsRequest:   sipMsg.StartLine.IsRequest,
+		Method:      sipMsg.StartLine.Method,
+		StatusCode:  sipMsg.StartLine.StatusCode,
+		StatusDesc:  sipMsg.StartLine.Reason,
+		CallID:      sipMsg.Headers.GetHeader(sip.CallID),
+		From:        sipMsg.Headers.GetHeader(sip.From),
+		To:          sipMsg.Headers.GetHeader(sip.To),
+		CSeq:        sipMsg.Headers.GetHeader(sip.CSeq),
+		UserAgent:   sipMsg.Headers.GetHeader(sip.UserAgent),
+	}
+
+	return sipPacket, nil
 }
 
-func (a *Analyzer) processPacket(packet gopacket.Packet, analysis *Analysis) error {
-	timestamp := packet.Metadata().Timestamp
+// Print outputs the analysis results
+func (a *Analysis) Print() {
+	fmt.Printf("Found %d SIP packets\n\n", len(a.Packets))
 
-	// Record first and last packet times
-	if analysis.FirstPacketTime.IsZero() {
-		analysis.FirstPacketTime = timestamp
+	for _, packet := range a.Packets {
+		fmt.Printf("Time: %s\n", packet.Timestamp.Format(time.RFC3339))
+		fmt.Printf("From: %s:%d -> %s:%d\n", 
+			packet.SrcIP, packet.SrcPort, 
+			packet.DstIP, packet.DstPort)
+		
+		if packet.IsRequest {
+			fmt.Printf("Request: %s\n", packet.Method)
+		} else {
+			fmt.Printf("Response: %d %s\n", packet.StatusCode, packet.StatusDesc)
+		}
+
+		fmt.Printf("Call-ID: %s\n", packet.CallID)
+		fmt.Printf("From: %s\n", packet.From)
+		fmt.Printf("To: %s\n", packet.To)
+		fmt.Printf("CSeq: %s\n", packet.CSeq)
+		if packet.UserAgent != "" {
+			fmt.Printf("User-Agent: %s\n", packet.UserAgent)
+		}
+		fmt.Println()
 	}
-	analysis.LastPacketTime = timestamp
-
-	// Extract IP and port information
-	ipLayer := packet.NetworkLayer()
-	tcpLayer := packet.TransportLayer()
-
-	if ipLayer == nil || tcpLayer == nil {
-		return fmt.Errorf("packet missing IP or transport layer")
-	}
-
-	srcIP := ipLayer.NetworkFlow().Src().String()
-	dstIP := ipLayer.NetworkFlow().Dst().String()
-	srcPort := tcpLayer.TransportFlow().Src().String()
-	dstPort := tcpLayer.TransportFlow().Dst().String()
-
-	// Record unique addresses
-	srcAddr := fmt.Sprintf("%s:%s", srcIP, srcPort)
-	dstAddr := fmt.Sprintf("%s:%s", dstIP, dstPort)
-	analysis.UniqueAddresses[srcAddr] = struct{}{}
-	analysis.UniqueAddresses[dstAddr] = struct{}{}
-
-	// Get payload from different layers
-	var sipPayload []byte
-	var sdpPayload []byte
-	var protocol string
-	if appLayer := packet.ApplicationLayer(); appLayer != nil {
-		sipPayload = appLayer.LayerContents()
-		sdpPayload = appLayer.Payload()
-		protocol = "SIP" // Assume SIP for port 5060/5080
-	}
-
-	// Parse SIP content if present
-	var sipMethod string
-	var sipHeaders map[string]string
-	var sdpBody string
-	if protocol == "SIP" && sipPayload != nil {
-		sipMethod, sipHeaders, _ = parseSIPPacket(sipPayload)
-		sdpBody = string(sdpPayload)
-	}
-
-	// Record packet information
-	analysis.Packets = append(analysis.Packets, Packet{
-		Source:      srcAddr,
-		Destination: dstAddr,
-		Timestamp:   timestamp,
-		SIPPayload:  sipPayload,
-		SDPPayload:  sdpPayload,
-		Protocol:    protocol,
-		SIPMethod:   sipMethod,
-		SIPHeaders:  sipHeaders,
-		SDPBody:     sdpBody,
-	})
-
-	return nil
 }
 
 func parsePort(portStr string) (uint16, error) {
 	var port uint16
 	_, err := fmt.Sscanf(portStr, "%d", &port)
 	return port, err
-}
-
-// Print formats and prints the analysis results
-func (a *Analysis) Print() {
-	fmt.Println("\nCapture Period:")
-	fmt.Printf("Start: %s\n", a.FirstPacketTime.Format(time.RFC3339))
-	fmt.Printf("End:   %s\n", a.LastPacketTime.Format(time.RFC3339))
-	fmt.Printf("Duration: %s\n", a.LastPacketTime.Sub(a.FirstPacketTime))
-
-	fmt.Println("\nUnique Addresses:")
-	for addr := range a.UniqueAddresses {
-		fmt.Printf("- %s\n", addr)
-	}
-
-	fmt.Println("\nPacket Details:")
-	for _, pkt := range a.Packets {
-		fmt.Printf("Time: %s\n", pkt.Timestamp.Format(time.RFC3339))
-		fmt.Printf("Source: %s\n", pkt.Source)
-		fmt.Printf("Destination: %s\n", pkt.Destination)
-		if pkt.Protocol == "SIP" {
-			fmt.Println("SIP Packet:")
-			fmt.Printf("  Method: %s\n", pkt.SIPMethod)
-			if len(pkt.SIPHeaders) > 0 {
-				fmt.Println("  Headers:")
-				for key, value := range pkt.SIPHeaders {
-					fmt.Printf("    %s: %s\n", key, value)
-				}
-			}
-			if pkt.SDPBody != "" {
-				fmt.Println("  SDP Body:")
-				lines := strings.Split(pkt.SDPBody, "\r\n")
-				for _, line := range lines {
-					fmt.Printf("    %s\n", line)
-				}
-			}
-		} else if pkt.SIPPayload != nil {
-			fmt.Printf("Payload (%d bytes):\n", len(pkt.SIPPayload))
-			fmt.Printf("  Hex: %x\n", pkt.SIPPayload)
-			fmt.Printf("  ASCII: %s\n", string(pkt.SIPPayload))
-		}
-		fmt.Println()
-	}
 } 
