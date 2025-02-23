@@ -247,113 +247,101 @@ func (g *CallGroup) BuildCallFlow(logger Logger) *CallFlow {
 	flow := &CallFlow{
 		CallID:       g.CallID,
 		Participants: make(map[string]*Participant),
-		Interactions: make([]*Interaction, 0),
+		Interactions: make([]*Interaction, 0, len(g.Packets)),
 	}
 
-	// Process each packet to build the call flow
+	// First pass: collect all participants
 	for _, packet := range g.Packets {
-		// Extract participants from SIP headers
-		fromURI, _ := extractParticipantInfo(packet.From, "", 0)
-		toURI, _ := extractParticipantInfo(packet.To, "", 0)
+		fromURI, fromAddr := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
+		toURI, toAddr := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
 
-		// Extract network addresses
-		srcAddr := fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
-		dstAddr := fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
+		// Check if source or destination is a server (port 5060 or 5080)
+		isServerSource := packet.SrcPort == 5060 || packet.SrcPort == 5080
+		isServerDest := packet.DstPort == 5060 || packet.DstPort == 5080
 
-		// Log packet details for debugging
-		if logger != nil {
-			logger.Info(fmt.Sprintf("\nProcessing packet:\n"+
-				"  IsRequest: %v\n"+
-				"  Method: %s\n"+
-				"  CSeq: %s\n"+
-				"  Status: %d\n"+
-				"  From URI: %s\n"+
-				"  To URI: %s\n"+
-				"  Source: %s\n"+
-				"  Destination: %s",
-				packet.IsRequest,
-				packet.Method,
-				packet.CSeq,
-				packet.StatusCode,
-				fromURI,
-				toURI,
-				srcAddr,
-				dstAddr))
+		// Create regular participants
+		if fromURI != "" {
+			flow.Participants[fromURI] = &Participant{URI: fromURI, Address: fromAddr}
+		}
+		if toURI != "" {
+			flow.Participants[toURI] = &Participant{URI: toURI, Address: toAddr}
 		}
 
-		// Determine if the source or destination is a proxy server
-		isProxySource := strings.Contains(srcAddr, ":5080")
-		isProxyDest := strings.Contains(dstAddr, ":5080")
-
-		var fromParticipant, toParticipant *Participant
-
-		if isProxySource || isProxyDest {
-			// Handle proxy server scenario
-			proxyURI := fmt.Sprintf("sip:proxy@%s", packet.SrcIP)
-			if isProxyDest {
-				proxyURI = fmt.Sprintf("sip:proxy@%s", packet.DstIP)
+		// Create server participants for REGISTER flows
+		if packet.Method == "REGISTER" || (packet.StatusCode > 0 && packet.CSeq != "" && strings.Contains(packet.CSeq, "REGISTER")) {
+			if isServerSource {
+				serverURI := "sip:server@" + packet.SrcIP
+				flow.Participants[serverURI] = &Participant{URI: serverURI, Address: fromAddr}
 			}
+			if isServerDest {
+				serverURI := "sip:server@" + packet.DstIP
+				flow.Participants[serverURI] = &Participant{URI: serverURI, Address: toAddr}
+			}
+		}
+	}
 
+	// Second pass: create interactions
+	for _, packet := range g.Packets {
+		fromURI, _ := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
+		toURI, _ := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
+
+		// Check if source or destination is a server (port 5060 or 5080)
+		isServerSource := packet.SrcPort == 5060 || packet.SrcPort == 5080
+		isServerDest := packet.DstPort == 5060 || packet.DstPort == 5080
+
+		var from, to *Participant
+
+		if packet.Method == "REGISTER" || (packet.StatusCode > 0 && packet.CSeq != "" && strings.Contains(packet.CSeq, "REGISTER")) {
+			// For REGISTER flows, use server participants
 			if packet.IsRequest {
-				if isProxySource {
-					// Proxy forwarding request
-					fromParticipant = flow.getOrCreateParticipant(proxyURI, srcAddr)
-					toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
-				} else {
-					// Request to proxy
-					fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
-					toParticipant = flow.getOrCreateParticipant(proxyURI, dstAddr)
+				// For requests, use From->Server
+				if fromURI != "" {
+					from = flow.Participants[fromURI]
+				}
+				if isServerDest {
+					serverURI := "sip:server@" + packet.DstIP
+					to = flow.Participants[serverURI]
 				}
 			} else {
-				if isProxySource {
-					// Proxy sending response
-					fromParticipant = flow.getOrCreateParticipant(proxyURI, srcAddr)
-					toParticipant = flow.getOrCreateParticipant(fromURI, dstAddr)
-				} else {
-					// Response to proxy
-					fromParticipant = flow.getOrCreateParticipant(toURI, srcAddr)
-					toParticipant = flow.getOrCreateParticipant(proxyURI, dstAddr)
+				// For responses, use Server->From
+				if isServerSource {
+					serverURI := "sip:server@" + packet.SrcIP
+					from = flow.Participants[serverURI]
+				}
+				if fromURI != "" {
+					to = flow.Participants[fromURI]
 				}
 			}
 		} else {
-			// Direct communication between endpoints
-			if packet.IsRequest {
-				fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
-				toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
-			} else {
-				// For responses, maintain the logical From/To relationship from SIP headers
-				fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
-				toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
+			// For regular calls, use From->To directly
+			if fromURI != "" {
+				from = flow.Participants[fromURI]
+			} else if isServerSource {
+				serverURI := "sip:server@" + packet.SrcIP
+				from = flow.Participants[serverURI]
+			}
+
+			if toURI != "" {
+				to = flow.Participants[toURI]
+			} else if isServerDest {
+				serverURI := "sip:server@" + packet.DstIP
+				to = flow.Participants[serverURI]
 			}
 		}
 
-		// Create interaction
+		// Create the interaction
 		interaction := &Interaction{
 			Timestamp: packet.Timestamp,
-			From:      fromParticipant,
-			To:        toParticipant,
+			From:      from,
+			To:        to,
 			Method:    packet.Method,
-			Status:    packet.StatusCode,
 			IsRequest: packet.IsRequest,
+			Status:    packet.StatusCode,
 		}
-
 		flow.Interactions = append(flow.Interactions, interaction)
 	}
 
 	return flow
-}
-
-// getOrCreateParticipant returns an existing participant or creates a new one
-func (f *CallFlow) getOrCreateParticipant(uri, addr string) *Participant {
-	if p, exists := f.Participants[uri]; exists {
-		return p
-	}
-	p := &Participant{
-		URI:     uri,
-		Address: addr,
-	}
-	f.Participants[uri] = p
-	return p
 }
 
 // extractParticipantInfo extracts URI and address from SIP headers and packet info
