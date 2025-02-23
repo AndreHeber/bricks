@@ -415,7 +415,7 @@ func TestCallFlow_GenerateMermaid(t *testing.T) {
 
 	// Verify interactions
 	assert.Contains(t, mermaid, "sip_alice_at_atlanta_com->>sip_bob_at_biloxi_com: INVITE")
-	assert.Contains(t, mermaid, "sip_bob_at_biloxi_com-->sip_alice_at_atlanta_com: 200 INVITE")
+	assert.Contains(t, mermaid, "sip_bob_at_biloxi_com->>sip_alice_at_atlanta_com: 200 INVITE")
 }
 
 func TestCleanMermaidName(t *testing.T) {

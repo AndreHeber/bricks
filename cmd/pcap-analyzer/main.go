@@ -156,6 +156,8 @@ func main() {
 
 	if cfg.debug {
 		logger.Info(fmt.Sprintf("Found %d SIP packets", len(analysis.Packets)))
+		// Print raw packet data
+		analysis.Print()
 	}
 
 	// Group packets by call and generate Mermaid diagrams
