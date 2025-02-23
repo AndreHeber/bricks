@@ -31,16 +31,17 @@ type Analysis struct {
 	Packets         []Packet
 }
 
-// Analyzer handles pcap file analysis
-type Analyzer struct {
-	maxPackets int
-	logger     Logger
-}
-
 // Logger interface for dependency injection of logging
 type Logger interface {
 	Info(msg string)
 	Error(msg string)
+}
+
+// Analyzer handles pcap file analysis
+type Analyzer struct {
+	maxPackets int
+	logger     Logger
+	filters    []PacketFilter
 }
 
 // NewAnalyzer creates a new pcap analyzer
@@ -48,7 +49,13 @@ func NewAnalyzer(maxPackets int, logger Logger) *Analyzer {
 	return &Analyzer{
 		maxPackets: maxPackets,
 		logger:     logger,
+		filters:    make([]PacketFilter, 0),
 	}
+}
+
+// AddFilter adds a packet filter to the analyzer
+func (a *Analyzer) AddFilter(filter PacketFilter) {
+	a.filters = append(a.filters, filter)
 }
 
 // AnalyzeFile analyzes a pcap file and returns the analysis results
@@ -58,6 +65,12 @@ func (a *Analyzer) AnalyzeFile(filepath string) (*Analysis, error) {
 		return nil, fmt.Errorf("opening pcap file: %w", err)
 	}
 	defer handle.Close()
+
+	// Set BPF filter for SIP traffic (default port 5060)
+	err = handle.SetBPFFilter("port 5060")
+	if err != nil {
+		return nil, fmt.Errorf("error setting BPF filter: %v", err)
+	}
 
 	analysis := &Analysis{
 		UniqueAddresses: make(map[string]struct{}),
