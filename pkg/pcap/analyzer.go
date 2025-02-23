@@ -405,8 +405,8 @@ func (f *CallFlow) GenerateMermaid() string {
 		} else {
 			// Response: solid arrow
 			msg := fmt.Sprintf("%d %s", interaction.Status, interaction.Method)
-			// For responses, swap From/To to show the response going from the responder to the requester
-			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", to, from, msg))
+			// For responses, use the actual From/To participants to show the response going from responder to requester
+			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", from, to, msg))
 		}
 	}
 

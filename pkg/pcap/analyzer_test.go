@@ -383,20 +383,20 @@ func TestCallFlow_GenerateMermaid(t *testing.T) {
 					URI:     "sip:bob@biloxi.com",
 					Address: "192.168.1.2:5060",
 				},
-				Method:    "INVITE",
+				Method:    "REGISTER",
 				IsRequest: true,
 			},
 			{
 				Timestamp: time.Now().Add(time.Second),
 				From: &Participant{
-					URI:     "sip:alice@atlanta.com",
-					Address: "192.168.1.1:5060",
-				},
-				To: &Participant{
 					URI:     "sip:bob@biloxi.com",
 					Address: "192.168.1.2:5060",
 				},
-				Method:    "INVITE",
+				To: &Participant{
+					URI:     "sip:alice@atlanta.com",
+					Address: "192.168.1.1:5060",
+				},
+				Method:    "REGISTER",
 				Status:    200,
 				IsRequest: false,
 			},
@@ -414,8 +414,8 @@ func TestCallFlow_GenerateMermaid(t *testing.T) {
 	assert.Contains(t, mermaid, "participant sip_bob_at_biloxi_com")
 
 	// Verify interactions
-	assert.Contains(t, mermaid, "sip_alice_at_atlanta_com->>sip_bob_at_biloxi_com: INVITE")
-	assert.Contains(t, mermaid, "sip_bob_at_biloxi_com->>sip_alice_at_atlanta_com: 200 INVITE")
+	assert.Contains(t, mermaid, "sip_alice_at_atlanta_com->>sip_bob_at_biloxi_com: REGISTER")
+	assert.Contains(t, mermaid, "sip_bob_at_biloxi_com->>sip_alice_at_atlanta_com: 200 REGISTER")
 }
 
 func TestCleanMermaidName(t *testing.T) {
