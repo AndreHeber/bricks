@@ -252,13 +252,49 @@ func (g *CallGroup) BuildCallFlow() *CallFlow {
 
 	// Process each packet to build the call flow
 	for _, packet := range g.Packets {
-		// Extract participants
-		fromURI, fromAddr := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
-		toURI, toAddr := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
+		// Extract participants from SIP headers
+		fromURI, _ := extractParticipantInfo(packet.From, "", 0)
+		toURI, _ := extractParticipantInfo(packet.To, "", 0)
 
-		// Add or get participants
-		fromParticipant := flow.getOrCreateParticipant(fromURI, fromAddr)
-		toParticipant := flow.getOrCreateParticipant(toURI, toAddr)
+		// Extract network addresses
+		srcAddr := fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
+		dstAddr := fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
+
+		// For REGISTER requests, use the actual network addresses to identify participants
+		var fromParticipant, toParticipant *Participant
+		if packet.Method == "REGISTER" {
+			// Create or get the client and registrar participants
+			clientURI := fromURI
+			registrarURI := "sip:" + packet.DstIP
+			clientAddr := fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
+			registrarAddr := fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
+
+			if !packet.IsRequest {
+				registrarURI = "sip:" + packet.SrcIP
+				clientAddr = fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
+				registrarAddr = fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
+			}
+
+			client := flow.getOrCreateParticipant(clientURI, clientAddr)
+			registrar := flow.getOrCreateParticipant(registrarURI, registrarAddr)
+
+			if packet.IsRequest {
+				fromParticipant = client
+				toParticipant = registrar
+			} else {
+				fromParticipant = registrar
+				toParticipant = client
+			}
+		} else {
+			// For other methods, use the From/To URIs and corresponding addresses
+			if packet.IsRequest {
+				fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
+				toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
+			} else {
+				fromParticipant = flow.getOrCreateParticipant(fromURI, dstAddr)
+				toParticipant = flow.getOrCreateParticipant(toURI, srcAddr)
+			}
+		}
 
 		// Create interaction
 		interaction := &Interaction{
@@ -338,7 +374,8 @@ func (f *CallFlow) GenerateMermaid() string {
 		} else {
 			// Response: dotted arrow with status
 			msg := fmt.Sprintf("%d %s", interaction.Status, interaction.Method)
-			b.WriteString(fmt.Sprintf("    %s-->%s: %s\n", to, from, msg))
+			// For responses, the arrow goes from the responder (To) to the requester (From)
+			b.WriteString(fmt.Sprintf("    %s-->%s: %s\n", from, to, msg))
 		}
 	}
 
@@ -372,9 +409,10 @@ func cleanMermaidName(s string) string {
 func (a *Analysis) Print() {
 	fmt.Printf("Found %d SIP packets\n\n", len(a.Packets))
 
-	for _, packet := range a.Packets {
+	for i, packet := range a.Packets {
+		fmt.Printf("=== Packet %d ===\n", i+1)
 		fmt.Printf("Time: %s\n", packet.Timestamp.Format(time.RFC3339))
-		fmt.Printf("From: %s:%d -> %s:%d\n", 
+		fmt.Printf("Network: %s:%d -> %s:%d\n", 
 			packet.SrcIP, packet.SrcPort, 
 			packet.DstIP, packet.DstPort)
 		
@@ -385,12 +423,20 @@ func (a *Analysis) Print() {
 		}
 
 		fmt.Printf("Call-ID: %s\n", packet.CallID)
-		fmt.Printf("From: %s\n", packet.From)
-		fmt.Printf("To: %s\n", packet.To)
+		fmt.Printf("From (raw): %s\n", packet.From)
+		fmt.Printf("To (raw): %s\n", packet.To)
 		fmt.Printf("CSeq: %s\n", packet.CSeq)
 		if packet.UserAgent != "" {
 			fmt.Printf("User-Agent: %s\n", packet.UserAgent)
 		}
+
+		// Extract and print participant info
+		fromURI, _ := extractParticipantInfo(packet.From, "", 0)
+		toURI, _ := extractParticipantInfo(packet.To, "", 0)
+		fmt.Printf("From URI: %s\n", fromURI)
+		fmt.Printf("To URI: %s\n", toURI)
+
+		fmt.Printf("\nRaw payload:\n%s\n", string(packet.Payload))
 		fmt.Println()
 	}
 }
