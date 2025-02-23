@@ -3,6 +3,7 @@ package pcap
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/AndreHeber/pcap-analyzer/pkg/sip"
@@ -216,6 +217,93 @@ func (a *Analysis) GroupByCall() map[string]*CallGroup {
 	}
 
 	return groups
+}
+
+// Participant represents an endpoint in a SIP call
+type Participant struct {
+	URI     string
+	Address string // IP:Port
+}
+
+// CallFlow represents the sequence of SIP interactions in a call
+type CallFlow struct {
+	CallID       string
+	Participants map[string]*Participant // key is the URI
+	Interactions []*Interaction
+}
+
+// Interaction represents a single SIP message exchange
+type Interaction struct {
+	Timestamp time.Time
+	From      *Participant
+	To        *Participant
+	Method    string
+	Status    int
+	IsRequest bool
+}
+
+// BuildCallFlow creates a CallFlow from a group of SIP packets
+func (g *CallGroup) BuildCallFlow() *CallFlow {
+	flow := &CallFlow{
+		CallID:       g.CallID,
+		Participants: make(map[string]*Participant),
+		Interactions: make([]*Interaction, 0),
+	}
+
+	// Process each packet to build the call flow
+	for _, packet := range g.Packets {
+		// Extract participants
+		fromURI, fromAddr := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
+		toURI, toAddr := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
+
+		// Add or get participants
+		fromParticipant := flow.getOrCreateParticipant(fromURI, fromAddr)
+		toParticipant := flow.getOrCreateParticipant(toURI, toAddr)
+
+		// Create interaction
+		interaction := &Interaction{
+			Timestamp: packet.Timestamp,
+			From:      fromParticipant,
+			To:        toParticipant,
+			Method:    packet.Method,
+			Status:    packet.StatusCode,
+			IsRequest: packet.IsRequest,
+		}
+
+		flow.Interactions = append(flow.Interactions, interaction)
+	}
+
+	return flow
+}
+
+// getOrCreateParticipant returns an existing participant or creates a new one
+func (f *CallFlow) getOrCreateParticipant(uri, addr string) *Participant {
+	if p, exists := f.Participants[uri]; exists {
+		return p
+	}
+	p := &Participant{
+		URI:     uri,
+		Address: addr,
+	}
+	f.Participants[uri] = p
+	return p
+}
+
+// extractParticipantInfo extracts URI and address from SIP headers and packet info
+func extractParticipantInfo(sipAddr, ip string, port uint16) (uri, addr string) {
+	// Extract URI from SIP address (e.g., "Bob <sip:bob@biloxi.com>" -> "sip:bob@biloxi.com")
+	if start := strings.Index(sipAddr, "<"); start != -1 {
+		if end := strings.Index(sipAddr[start:], ">"); end != -1 {
+			uri = sipAddr[start+1 : start+end]
+		}
+	}
+	if uri == "" {
+		uri = sipAddr
+	}
+
+	// Create address string
+	addr = fmt.Sprintf("%s:%d", ip, port)
+	return uri, addr
 }
 
 // Print outputs the analysis results

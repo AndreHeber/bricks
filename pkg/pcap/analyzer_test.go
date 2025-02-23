@@ -211,4 +211,149 @@ func TestAnalysis_GroupByCall(t *testing.T) {
 	assert.Equal(t, "call-2", call2Group.CallID)
 	assert.Len(t, call2Group.Packets, 1)
 	assert.Equal(t, "REGISTER", call2Group.Packets[0].Method)
+}
+
+func TestCallGroup_BuildCallFlow(t *testing.T) {
+	now := time.Now()
+	group := &CallGroup{
+		CallID: "test-call-1",
+		Packets: []*SIPPacket{
+			{
+				PacketInfo: PacketInfo{
+					Timestamp: now,
+					SrcIP:     "192.168.1.1",
+					DstIP:     "192.168.1.2",
+					SrcPort:   5060,
+					DstPort:   5060,
+				},
+				Method:    "INVITE",
+				CallID:    "test-call-1",
+				From:      "Alice <sip:alice@atlanta.com>",
+				To:        "Bob <sip:bob@biloxi.com>",
+				IsRequest: true,
+			},
+			{
+				PacketInfo: PacketInfo{
+					Timestamp: now.Add(time.Second),
+					SrcIP:     "192.168.1.2",
+					DstIP:     "192.168.1.1",
+					SrcPort:   5060,
+					DstPort:   5060,
+				},
+				Method:     "INVITE",
+				CallID:     "test-call-1",
+				From:       "Alice <sip:alice@atlanta.com>",
+				To:        "Bob <sip:bob@biloxi.com>",
+				StatusCode: 200,
+				StatusDesc: "OK",
+				IsRequest:  false,
+			},
+			{
+				PacketInfo: PacketInfo{
+					Timestamp: now.Add(2 * time.Second),
+					SrcIP:     "192.168.1.1",
+					DstIP:     "192.168.1.2",
+					SrcPort:   5060,
+					DstPort:   5060,
+				},
+				Method:    "BYE",
+				CallID:    "test-call-1",
+				From:      "Alice <sip:alice@atlanta.com>",
+				To:        "Bob <sip:bob@biloxi.com>",
+				IsRequest: true,
+			},
+		},
+	}
+
+	flow := group.BuildCallFlow()
+
+	// Verify call flow basics
+	assert.Equal(t, "test-call-1", flow.CallID)
+	assert.Len(t, flow.Participants, 2)
+	assert.Len(t, flow.Interactions, 3)
+
+	// Verify participants
+	aliceURI := "sip:alice@atlanta.com"
+	bobURI := "sip:bob@biloxi.com"
+	
+	alice, exists := flow.Participants[aliceURI]
+	assert.True(t, exists)
+	assert.Equal(t, aliceURI, alice.URI)
+	assert.Equal(t, "192.168.1.1:5060", alice.Address)
+
+	bob, exists := flow.Participants[bobURI]
+	assert.True(t, exists)
+	assert.Equal(t, bobURI, bob.URI)
+	assert.Equal(t, "192.168.1.2:5060", bob.Address)
+
+	// Verify interactions in sequence
+	interactions := flow.Interactions
+	
+	// First interaction: INVITE request
+	assert.Equal(t, now, interactions[0].Timestamp)
+	assert.Equal(t, alice, interactions[0].From)
+	assert.Equal(t, bob, interactions[0].To)
+	assert.Equal(t, "INVITE", interactions[0].Method)
+	assert.True(t, interactions[0].IsRequest)
+	assert.Equal(t, 0, interactions[0].Status)
+
+	// Second interaction: 200 OK response
+	assert.Equal(t, now.Add(time.Second), interactions[1].Timestamp)
+	assert.Equal(t, alice, interactions[1].From)
+	assert.Equal(t, bob, interactions[1].To)
+	assert.Equal(t, "INVITE", interactions[1].Method)
+	assert.False(t, interactions[1].IsRequest)
+	assert.Equal(t, 200, interactions[1].Status)
+
+	// Third interaction: BYE request
+	assert.Equal(t, now.Add(2*time.Second), interactions[2].Timestamp)
+	assert.Equal(t, alice, interactions[2].From)
+	assert.Equal(t, bob, interactions[2].To)
+	assert.Equal(t, "BYE", interactions[2].Method)
+	assert.True(t, interactions[2].IsRequest)
+	assert.Equal(t, 0, interactions[2].Status)
+}
+
+func TestExtractParticipantInfo(t *testing.T) {
+	tests := []struct {
+		name         string
+		sipAddr      string
+		ip          string
+		port         uint16
+		expectedURI  string
+		expectedAddr string
+	}{
+		{
+			name:         "Full SIP address",
+			sipAddr:      "Alice <sip:alice@atlanta.com>",
+			ip:          "192.168.1.1",
+			port:        5060,
+			expectedURI: "sip:alice@atlanta.com",
+			expectedAddr: "192.168.1.1:5060",
+		},
+		{
+			name:         "URI only",
+			sipAddr:      "sip:bob@biloxi.com",
+			ip:          "192.168.1.2",
+			port:        5061,
+			expectedURI: "sip:bob@biloxi.com",
+			expectedAddr: "192.168.1.2:5061",
+		},
+		{
+			name:         "Empty SIP address",
+			sipAddr:      "",
+			ip:          "192.168.1.3",
+			port:        5062,
+			expectedURI: "",
+			expectedAddr: "192.168.1.3:5062",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uri, addr := extractParticipantInfo(tt.sipAddr, tt.ip, tt.port)
+			assert.Equal(t, tt.expectedURI, uri)
+			assert.Equal(t, tt.expectedAddr, addr)
+		})
+	}
 } 
