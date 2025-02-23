@@ -270,40 +270,46 @@ func (g *CallGroup) BuildCallFlow() *CallFlow {
 		fmt.Printf("  Source: %s\n", srcAddr)
 		fmt.Printf("  Destination: %s\n", dstAddr)
 
-		// For REGISTER requests and responses, use the actual network addresses to identify participants
-		var fromParticipant, toParticipant *Participant
-		if packet.IsRequest && packet.Method == "REGISTER" || !packet.IsRequest && strings.Contains(packet.CSeq, "REGISTER") {
-			// Create or get the client and registrar participants
-			clientURI := fromURI
-			registrarURI := "sip:" + packet.DstIP
+		// Determine if the source or destination is a proxy server
+		isProxySource := strings.Contains(srcAddr, ":5080")
+		isProxyDest := strings.Contains(dstAddr, ":5080")
 
-			if packet.IsRequest {
-				// For requests, client is the source and registrar is the destination
-				client := flow.getOrCreateParticipant(clientURI, srcAddr)
-				registrar := flow.getOrCreateParticipant(registrarURI, dstAddr)
-				fromParticipant = client
-				toParticipant = registrar
-			} else {
-				// For responses, registrar is the source and client is the destination
-				registrarURI = "sip:" + packet.SrcIP // Update registrar URI for response
-				client := flow.getOrCreateParticipant(clientURI, dstAddr)
-				registrar := flow.getOrCreateParticipant(registrarURI, srcAddr)
-				fromParticipant = registrar
-				toParticipant = client
+		var fromParticipant, toParticipant *Participant
+
+		if isProxySource || isProxyDest {
+			// Handle proxy server scenario
+			proxyURI := fmt.Sprintf("sip:proxy@%s", packet.SrcIP)
+			if isProxyDest {
+				proxyURI = fmt.Sprintf("sip:proxy@%s", packet.DstIP)
 			}
 
-			fmt.Printf("  REGISTER handling:\n")
-			fmt.Printf("    Client URI: %s\n", clientURI)
-			fmt.Printf("    Registrar URI: %s\n", registrarURI)
-			fmt.Printf("    From Participant: %+v\n", fromParticipant)
-			fmt.Printf("    To Participant: %+v\n", toParticipant)
+			if packet.IsRequest {
+				if isProxySource {
+					// Proxy forwarding request
+					fromParticipant = flow.getOrCreateParticipant(proxyURI, srcAddr)
+					toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
+				} else {
+					// Request to proxy
+					fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
+					toParticipant = flow.getOrCreateParticipant(proxyURI, dstAddr)
+				}
+			} else {
+				if isProxySource {
+					// Proxy sending response
+					fromParticipant = flow.getOrCreateParticipant(proxyURI, srcAddr)
+					toParticipant = flow.getOrCreateParticipant(fromURI, dstAddr)
+				} else {
+					// Response to proxy
+					fromParticipant = flow.getOrCreateParticipant(toURI, srcAddr)
+					toParticipant = flow.getOrCreateParticipant(proxyURI, dstAddr)
+				}
+			}
 		} else {
-			// For other methods, use the From/To URIs and corresponding addresses
+			// Direct communication between endpoints
 			if packet.IsRequest {
 				fromParticipant = flow.getOrCreateParticipant(fromURI, srcAddr)
 				toParticipant = flow.getOrCreateParticipant(toURI, dstAddr)
 			} else {
-				// For responses, swap From/To and use correct addresses
 				fromParticipant = flow.getOrCreateParticipant(toURI, srcAddr)
 				toParticipant = flow.getOrCreateParticipant(fromURI, dstAddr)
 			}
@@ -388,7 +394,7 @@ func (f *CallFlow) GenerateMermaid() string {
 			// Response: dotted arrow with status
 			msg := fmt.Sprintf("%d %s", interaction.Status, interaction.Method)
 			// For responses, the arrow goes from the responder to the requester
-			b.WriteString(fmt.Sprintf("    %s-->%s: %s\n", from, to, msg))
+			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", from, to, msg))
 		}
 	}
 
