@@ -238,7 +238,7 @@ type Interaction struct {
 	From      *Participant
 	To        *Participant
 	Method    string
-	Status    int
+	Status    string
 	IsRequest bool
 }
 
@@ -250,96 +250,102 @@ func (g *CallGroup) BuildCallFlow(logger Logger) *CallFlow {
 		Interactions: make([]*Interaction, 0, len(g.Packets)),
 	}
 
-	// First pass: collect all participants
+	// log all packets
+	logger.Info(fmt.Sprintf("Processing %d packets for call %s", len(g.Packets), g.CallID))
+	for i, packet := range g.Packets {
+		// Log each packet's basic info
+		if packet.IsRequest {
+			logger.Info(fmt.Sprintf("Packet %d: Request %s from %s:%d to %s:%d", 
+				i+1, packet.Method, packet.SrcIP, packet.SrcPort, packet.DstIP, packet.DstPort))
+		} else {
+			logger.Info(fmt.Sprintf("Packet %d: Response %d from %s:%d to %s:%d", 
+				i+1, packet.StatusCode, packet.SrcIP, packet.SrcPort, packet.DstIP, packet.DstPort))
+		}
+	}
+
+	// Create participants
 	for _, packet := range g.Packets {
-		fromURI, fromAddr := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
-		toURI, toAddr := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
+		fromAddr := fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
+		toAddr := fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
+		// fromURI, _ := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
+		// toURI, _ := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
 
-		// Check if source or destination is a server (port 5060 or 5080)
-		isServerSource := packet.SrcPort == 5060 || packet.SrcPort == 5080
-		isServerDest := packet.DstPort == 5060 || packet.DstPort == 5080
-
-		// Create regular participants
-		if fromURI != "" {
-			flow.Participants[fromURI] = &Participant{URI: fromURI, Address: fromAddr}
-		}
-		if toURI != "" {
-			flow.Participants[toURI] = &Participant{URI: toURI, Address: toAddr}
-		}
-
-		// Create server participants for REGISTER flows
-		if packet.Method == "REGISTER" || (packet.StatusCode > 0 && packet.CSeq != "" && strings.Contains(packet.CSeq, "REGISTER")) {
-			if isServerSource {
-				serverURI := "sip:server@" + packet.SrcIP
-				flow.Participants[serverURI] = &Participant{URI: serverURI, Address: fromAddr}
+		if fromAddr != "" {
+			if _, ok := flow.Participants[fromAddr]; !ok {
+				flow.Participants[fromAddr] = &Participant{Address: fromAddr}
 			}
-			if isServerDest {
-				serverURI := "sip:server@" + packet.DstIP
-				flow.Participants[serverURI] = &Participant{URI: serverURI, Address: toAddr}
+		}
+		if toAddr != "" {
+			if _, ok := flow.Participants[toAddr]; !ok {
+				flow.Participants[toAddr] = &Participant{Address: toAddr}
 			}
 		}
 	}
 
-	// Second pass: create interactions
+	// Create interactions
 	for _, packet := range g.Packets {
-		fromURI, _ := extractParticipantInfo(packet.From, packet.SrcIP, packet.SrcPort)
-		toURI, _ := extractParticipantInfo(packet.To, packet.DstIP, packet.DstPort)
-
-		// Check if source or destination is a server (port 5060 or 5080)
-		isServerSource := packet.SrcPort == 5060 || packet.SrcPort == 5080
-		isServerDest := packet.DstPort == 5060 || packet.DstPort == 5080
-
 		var from, to *Participant
 
-		if packet.Method == "REGISTER" || (packet.StatusCode > 0 && packet.CSeq != "" && strings.Contains(packet.CSeq, "REGISTER")) {
-			// For REGISTER flows, use server participants
-			if packet.IsRequest {
-				// For requests, use From->Server
-				if fromURI != "" {
-					from = flow.Participants[fromURI]
-				}
-				if isServerDest {
-					serverURI := "sip:server@" + packet.DstIP
-					to = flow.Participants[serverURI]
-				}
+		// For other flows, use From/To headers
+		fromAddr := fmt.Sprintf("%s:%d", packet.SrcIP, packet.SrcPort)
+		toAddr := fmt.Sprintf("%s:%d", packet.DstIP, packet.DstPort)
+		from = flow.Participants[fromAddr]
+		to = flow.Participants[toAddr]
+
+		// Create the interaction only if both from and to are valid
+		if from != nil && to != nil {
+			interaction := &Interaction{
+				Timestamp: packet.Timestamp,
+				From:      from,
+				To:        to,
+				Method:    packet.Method,
+				IsRequest: packet.IsRequest,
+				Status:    fmt.Sprintf("%d %s", packet.StatusCode, packet.StatusDesc),
+			}
+			flow.Interactions = append(flow.Interactions, interaction)
+
+			// Log the added interaction
+			if interaction.IsRequest {
+				logger.Info(fmt.Sprintf("Added request interaction: %s->>%s: %s", 
+					cleanMermaidName(from.Address),
+					cleanMermaidName(to.Address),
+					interaction.Method))
 			} else {
-				// For responses, use Server->From
-				if isServerSource {
-					serverURI := "sip:server@" + packet.SrcIP
-					from = flow.Participants[serverURI]
-				}
-				if fromURI != "" {
-					to = flow.Participants[fromURI]
-				}
+				logger.Info(fmt.Sprintf("Added response interaction: %s->>%s: %s", 
+					cleanMermaidName(from.Address),
+					cleanMermaidName(to.Address),
+					interaction.Status))
 			}
 		} else {
-			// For regular calls, use From->To directly
-			if fromURI != "" {
-				from = flow.Participants[fromURI]
-			} else if isServerSource {
-				serverURI := "sip:server@" + packet.SrcIP
-				from = flow.Participants[serverURI]
-			}
-
-			if toURI != "" {
-				to = flow.Participants[toURI]
-			} else if isServerDest {
-				serverURI := "sip:server@" + packet.DstIP
-				to = flow.Participants[serverURI]
-			}
+			logger.Error(fmt.Sprintf("Missing from (%v) or to (%v) participant for interaction", from, to))
 		}
-
-		// Create the interaction
-		interaction := &Interaction{
-			Timestamp: packet.Timestamp,
-			From:      from,
-			To:        to,
-			Method:    packet.Method,
-			IsRequest: packet.IsRequest,
-			Status:    packet.StatusCode,
-		}
-		flow.Interactions = append(flow.Interactions, interaction)
 	}
+
+	// Sort interactions by timestamp
+	sort.Slice(flow.Interactions, func(i, j int) bool {
+		return flow.Interactions[i].Timestamp.Before(flow.Interactions[j].Timestamp)
+	})
+
+	// Log all participants
+	logger.Info("Final participants:")
+	for uri, p := range flow.Participants {
+		logger.Info(fmt.Sprintf("  %s at %s", uri, p.Address))
+	}
+
+	// Log all interactions in order
+	logger.Info("Final interactions (in time order):")
+	for i, interaction := range flow.Interactions {
+		from := cleanMermaidName(getParticipantName(interaction.From))
+		to := cleanMermaidName(getParticipantName(interaction.To))
+		if interaction.IsRequest {
+			logger.Info(fmt.Sprintf("  %d. %s->>%s: %s", i+1, from, to, interaction.Method))
+		} else {
+			logger.Info(fmt.Sprintf("  %d. %s->>%s: %s", i+1, from, to, interaction.Status))
+		}
+	}
+
+	// Log the generated Mermaid diagram
+	logger.Info("Generated Mermaid diagram:\n" + flow.GenerateMermaid())
 
 	return flow
 }
@@ -356,8 +362,22 @@ func extractParticipantInfo(sipAddr, ip string, port uint16) (uri, addr string) 
 		uri = sipAddr
 	}
 
+	// Keep transport parameter in URI
+	if strings.Contains(uri, ";transport=") {
+		parts := strings.Split(uri, ";")
+		baseURI := parts[0]
+		for _, part := range parts[1:] {
+			if strings.HasPrefix(part, "transport=") {
+				uri = baseURI + ";transport=" + strings.ToUpper(strings.TrimPrefix(part, "transport="))
+				break
+			}
+		}
+	}
+
 	// Create address string
-	addr = fmt.Sprintf("%s:%d", ip, port)
+	if ip != "" {
+		addr = fmt.Sprintf("%s:%d", ip, port)
+	}
 	return uri, addr
 }
 
@@ -391,9 +411,8 @@ func (f *CallFlow) GenerateMermaid() string {
 			// Request: solid arrow
 			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", from, to, interaction.Method))
 		} else {
-			// Response: solid arrow
-			msg := fmt.Sprintf("%d %s", interaction.Status, interaction.Method)
-			// For responses, use the actual From/To participants to show the response going from responder to requester
+			// Response: solid arrow with just the status code
+			msg := fmt.Sprintf("%s", interaction.Status)
 			b.WriteString(fmt.Sprintf("    %s->>%s: %s\n", from, to, msg))
 		}
 	}
